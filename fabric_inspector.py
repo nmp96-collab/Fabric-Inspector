@@ -642,15 +642,14 @@ class FabricInspectorApp:
         )
 
     def _inspect_image_path(self, file_path):
-        """Run inspection and update the GUI display."""
+        """Run inspection and update the GUI display safely with error handling."""
         if self.processing:
             return
 
         if get_input_type(file_path) != "image":
             messagebox.showerror(
                 "Unsupported File",
-                "Please select a supported image file "
-                f"({', '.join(sorted(IMAGE_EXTENSIONS))}).",
+                f"Please select a supported image file ({', '.join(sorted(IMAGE_EXTENSIONS))}).",
             )
             return
 
@@ -659,17 +658,26 @@ class FabricInspectorApp:
         self._set_status(f"Processing: {os.path.basename(file_path)}")
 
         def worker():
-            result = inspect_image(file_path, self.model, self.session_defect_total)
+            result = None
+            error_msg = None
+            
+            try:
+                result = inspect_image(file_path, self.model, self.session_defect_total)
+            except Exception as e:
+                error_msg = str(e)
 
             def finish():
+                # This cleanup is now guaranteed to run, preventing the UI lockup
                 self.processing = False
                 self._set_controls_enabled(True)
 
+                if error_msg:
+                    messagebox.showerror("Processing Error", f"An error occurred during inspection:\n{error_msg}")
+                    self._set_status("Inspection failed due to an internal error.")
+                    return
+
                 if result is None:
-                    messagebox.showerror(
-                        "Read Error",
-                        f"Could not read image:\n{file_path}",
-                    )
+                    messagebox.showerror("Read Error", f"Could not read image:\n{file_path}")
                     self._set_status("Failed to read image.")
                     return
 
@@ -684,7 +692,6 @@ class FabricInspectorApp:
             self.root.after(0, finish)
 
         threading.Thread(target=worker, daemon=True).start()
-
     def on_select_image(self):
         """Open a file picker for a single image without restarting the app."""
         file_path = filedialog.askopenfilename(
